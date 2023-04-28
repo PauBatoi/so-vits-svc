@@ -18,6 +18,7 @@ from torch.cuda.amp import autocast, GradScaler
 import commons
 import utils
 from data_utils import TextAudioSpeakerLoader, EvalDataLoader
+#from data_utils2 import TextAudioSpeakerLoader, EvalDataLoader
 from models import (
     SynthesizerTrn,
     MultiPeriodDiscriminator,
@@ -57,7 +58,7 @@ def run(rank, n_gpus, hps):
         writer = SummaryWriter(log_dir=hps.model_dir)
         writer_eval = SummaryWriter(log_dir=os.path.join(hps.model_dir, "eval"))
 
-    dist.init_process_group(backend='nccl', init_method='env://', world_size=n_gpus, rank=rank)
+    dist.init_process_group(backend=  'gloo' if os.name == 'nt' else 'nccl', init_method='env://', world_size=n_gpus, rank=rank)
     torch.manual_seed(hps.train.seed)
     torch.cuda.set_device(rank)
 
@@ -95,6 +96,7 @@ def run(rank, n_gpus, hps):
                                                    optim_d)
         global_step = (epoch_str - 1) * len(train_loader)
     except:
+        raise Exception("No pretrained model found.")
         epoch_str = 1
         global_step = 0
 
@@ -222,6 +224,12 @@ def train_and_evaluate(rank, epoch, hps, nets, optims, schedulers, scaler, loade
                                       os.path.join(hps.model_dir, "G_{}.pth".format(global_step)))
                 utils.save_checkpoint(net_d, optim_d, hps.train.learning_rate, epoch,
                                       os.path.join(hps.model_dir, "D_{}.pth".format(global_step)))
+
+                keep_ckpts = getattr(hps.train, 'keep_ckpts', 0)
+                if keep_ckpts > 0:
+                    utils.clean_checkpoints(path_to_models='logs/32k/', n_ckpts_to_keep=keep_ckpts, sort_by_time=True)
+
+
         global_step += 1
 
     if rank == 0:
@@ -276,6 +284,7 @@ def evaluate(hps, generator, eval_loader, writer_eval):
     )
     generator.train()
 
+os.environ["PL_TORCH_DISTRIBUTED_BACKEND"] = "gloo"
 
 if __name__ == "__main__":
     main()
